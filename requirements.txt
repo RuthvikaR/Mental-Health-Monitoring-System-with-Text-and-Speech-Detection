@@ -1,0 +1,9 @@
+streamlit
+pandas
+nltk
+spacy
+vaderSentiment
+speechrecognition
+pydub
+librosa
+openpyxl
