@@ -7,3 +7,4 @@ speechrecognition
 pydub
 librosa
 openpyxl
+textblob

@@ -1,114 +1,242 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 
+# Modules
 from modules.preprocessing import clean_text
-from modules.sentiment import get_sentiment
 from modules.keywords import keyword_scores
 from modules.risk import compute_risk, risk_label
-from modules.speech import speech_to_text
+from modules.sentiment import get_sentiment
 
+# -------------------------
+# CONFIG
+# -------------------------
 st.set_page_config(page_title="Mental Health Monitor", layout="wide")
+st.title("Mental Health Monitoring System")
 
-st.title("🧠 Mental Health Monitoring System")
+# -------------------------
+# SESSION STATE INIT
+# -------------------------
+if "role" not in st.session_state:
+    st.session_state.role = None
 
-mode = st.sidebar.selectbox(
-    "Select Mode",
-    ["Dataset Analysis", "Manual Input", "Speech Input"]
-)
-
-# =========================
-# 🔹 ANALYSIS FUNCTION
-# =========================
-
+# -------------------------
+# ANALYSIS FUNCTION
+# -------------------------
 def analyze(text):
     clean = clean_text(text)
+
     sentiment = get_sentiment(clean)
-    dep, anx = keyword_scores(clean)
+    dep, anx, density = keyword_scores(clean)
+
     risk = compute_risk(sentiment, dep, anx)
     label = risk_label(risk)
 
-    return sentiment, dep, anx, risk, label
-
-
-# =========================
-# 📊 MODE 1: DATASET
-# =========================
-
-if mode == "Dataset Analysis":
-    st.header("📊 Dataset Analysis")
-
-    file = st.file_uploader("Upload Excel File", type=["xlsx"])
-
-    if file:
-        df = pd.read_excel(file)
-
-        st.write("Preview:", df.head())
-
-        if "raw_text" not in df.columns:
-            st.error("Dataset must contain 'raw_text' column")
-        else:
-            if st.button("Run Analysis"):
-                results = df["raw_text"].apply(analyze)
-
-                df["sentiment"] = results.apply(lambda x: x[0]["compound"])
-                df["depression_score"] = results.apply(lambda x: x[1])
-                df["anxiety_score"] = results.apply(lambda x: x[2])
-                df["risk_score"] = results.apply(lambda x: x[3])
-                df["risk_label"] = results.apply(lambda x: x[4])
-
-                st.success("Analysis Complete")
-                st.dataframe(df)
-
-                # Trend analysis if timestamp exists
-                if "timestamp" in df.columns:
-                    df["timestamp"] = pd.to_datetime(df["timestamp"])
-                    trend = df.groupby(df["timestamp"].dt.date)["risk_score"].mean()
-
-                    st.subheader("📈 Risk Trend Over Time")
-                    st.line_chart(trend)
-
+    return {
+        "clean": clean,
+        "sentiment": sentiment,
+        "dep": dep,
+        "anx": anx,
+        "density": density,
+        "risk": risk,
+        "risk_label": label
+    }
 
 # =========================
-# ✍️ MODE 2: MANUAL INPUT
+# 🏠 LANDING PAGE
 # =========================
+if st.session_state.role is None:
+    st.markdown("## Choose Your Role")
 
-elif mode == "Manual Input":
-    st.header("✍️ Manual Text Analysis")
+    col1, col2 = st.columns(2)
 
-    text = st.text_area("Enter text here")
+    with col1:
+        if st.button("👤 Client"):
+            st.session_state.role = "client"
 
-    if st.button("Analyze"):
-        sentiment, dep, anx, risk, label = analyze(text)
-
-        st.subheader("Results")
-
-        st.write("**Sentiment Score:**", sentiment["compound"])
-        st.write("**Depression Indicators:**", dep)
-        st.write("**Anxiety Indicators:**", anx)
-        st.write("**Risk Score:**", risk)
-        st.write("**Risk Level:**", label)
-
+    with col2:
+        if st.button("🧑‍⚕️ Therapist"):
+            st.session_state.role = "therapist"
 
 # =========================
-# 🎤 MODE 3: SPEECH INPUT
+# 👤 CLIENT DASHBOARD
 # =========================
+elif st.session_state.role == "client":
 
-elif mode == "Speech Input":
-    st.header("🎤 Speech Analysis")
+    st.sidebar.title("Client Menu")
+    mode = st.sidebar.selectbox("Select Mode", ["Text Chat", "Speech Input"])
 
-    audio_file = st.file_uploader("Upload WAV file", type=["wav"])
+    if st.sidebar.button("⬅️ Back to Home"):
+        st.session_state.role = None
+        st.rerun()
 
-    if audio_file:
-        text = speech_to_text(audio_file)
+    # -------------------------
+    # 💬 TEXT CHAT
+    # -------------------------
+    if mode == "Text Chat":
+        st.header("💬 Mental Health Chat Analysis")
 
-        st.write("**Transcribed Text:**", text)
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
 
-        sentiment, dep, anx, risk, label = analyze(text)
+        input_col1, input_col2 = st.columns([6, 1])
 
-        st.subheader("Results")
+        with input_col1:
+            user_input = st.text_input(
+                "Type your message",
+                label_visibility="collapsed",
+                placeholder="Type your message here..."
+            )
 
-        st.write("**Sentiment Score:**", sentiment["compound"])
-        st.write("**Depression Indicators:**", dep)
-        st.write("**Anxiety Indicators:**", anx)
-        st.write("**Risk Score:**", risk)
-        st.write("**Risk Level:**", label)
+        with input_col2:
+            send_clicked = st.button("Send")
+
+        if send_clicked and user_input:
+            result = analyze(user_input)
+
+            st.session_state.chat_history.append({
+                "text": user_input,
+                "analysis": result
+            })
+
+        for item in reversed(st.session_state.chat_history):
+            st.markdown("---")
+
+            col1, spacer, col2 = st.columns([2, 0.3, 3])
+
+            with col1:
+                st.markdown("### 💬 Message")
+                st.success(item["text"])
+
+            with col2:
+                analysis = item["analysis"]
+
+                st.markdown("### 📊 Analysis")
+
+                sub_col1, sub_col2 = st.columns(2)
+
+                with sub_col1:
+                    st.markdown("#### 🧠 Sentiment")
+                    st.write("Label:", analysis['sentiment']['label'])
+                    st.write("Polarity:", analysis['sentiment']['polarity'])
+                    st.write("Subjectivity:", analysis['sentiment']['subjectivity'])
+                    st.write("Compound:", analysis['sentiment']['vader']['compound'])
+
+                with sub_col2:
+                    st.markdown("#### ⚠️ Mental Health")
+                    st.write("Depression Score:", analysis['dep'])
+                    st.write("Anxiety Score:", analysis['anx'])
+                    st.write("Risk Score:", analysis['risk'])
+                    st.write("Risk Level:", analysis['risk_label'])
+
+    # -------------------------
+    # 🎤 SPEECH INPUT
+    # -------------------------
+    elif mode == "Speech Input":
+        import speech_recognition as sr
+
+        st.header("🎤 Speech Analysis")
+
+        recognizer = sr.Recognizer()
+        recognizer.pause_threshold = 2
+        recognizer.non_speaking_duration = 1.5
+        recognizer.phrase_threshold = 0.3
+
+        if "speech_history" not in st.session_state:
+            st.session_state.speech_history = []
+
+        speak_clicked = st.button("🎙️ Speak")
+        status_placeholder = st.empty()
+
+        if speak_clicked:
+            try:
+                with sr.Microphone() as source:
+                    status_placeholder.info("🎧 Listening...")
+                    recognizer.adjust_for_ambient_noise(source, duration=1)
+                    audio = recognizer.listen(source, timeout=10)
+
+                    status_placeholder.info("🧠 Processing...")
+                    text = recognizer.recognize_google(audio)
+
+                    result = analyze(text)
+                    status_placeholder.empty()
+
+                    st.session_state.speech_history.append({
+                        "text": text,
+                        "analysis": result
+                    })
+
+            except Exception as e:
+                status_placeholder.empty()
+                st.error(f"Error: {e}")
+
+        for item in reversed(st.session_state.speech_history):
+            st.markdown("---")
+
+            col1, spacer, col2 = st.columns([2, 0.3, 3])
+
+            with col1:
+                st.markdown("### 📝 Speech")
+                st.success(item["text"])
+
+            with col2:
+                analysis = item["analysis"]
+
+                st.markdown("### 📊 Analysis")
+
+                sub_col1, sub_col2 = st.columns(2)
+
+                with sub_col1:
+                    st.markdown("#### 🧠 Sentiment")
+                    st.write("Label:", analysis['sentiment']['label'])
+                    st.write("Polarity:", analysis['sentiment']['polarity'])
+                    st.write("Subjectivity:", analysis['sentiment']['subjectivity'])
+                    st.write("Compound:", analysis['sentiment']['vader']['compound'])
+
+                with sub_col2:
+                    st.markdown("#### ⚠️ Mental Health")
+                    st.write("Depression Score:", analysis['dep'])
+                    st.write("Anxiety Score:", analysis['anx'])
+                    st.write("Risk Score:", analysis['risk'])
+                    st.write("Risk Level:", analysis['risk_label'])
+
+# =========================
+# 🧑‍⚕️ THERAPIST DASHBOARD
+# =========================
+elif st.session_state.role == "therapist":
+
+    st.sidebar.title("Therapist Menu")
+    mode = st.sidebar.selectbox("Select Mode", ["Dataset Analysis"])
+
+    if st.sidebar.button("⬅️ Back to Home"):
+        st.session_state.role = None
+        st.rerun()
+
+    if mode == "Dataset Analysis":
+        st.header("📊 Dataset Analysis")
+
+        file = st.file_uploader("Upload Excel File", type=["xlsx"])
+
+        if file:
+            df = pd.read_excel(file)
+
+            if "raw_text" not in df.columns:
+                st.error("Dataset must contain 'raw_text'")
+            else:
+                if st.button("Run Analysis"):
+
+                    results = df["raw_text"].apply(analyze)
+
+                    df["polarity"] = results.apply(lambda x: x["sentiment"]["polarity"])
+                    df["subjectivity"] = results.apply(lambda x: x["sentiment"]["subjectivity"])
+                    df["sentiment_label"] = results.apply(lambda x: x["sentiment"]["label"])
+
+                    df["compound"] = results.apply(lambda x: x["sentiment"]["vader"]["compound"])
+
+                    df["depression_score"] = results.apply(lambda x: x["dep"])
+                    df["anxiety_score"] = results.apply(lambda x: x["anx"])
+                    df["risk_score"] = results.apply(lambda x: x["risk"])
+                    df["risk_label"] = results.apply(lambda x: x["risk_label"])
+
+                    st.success("Analysis Complete")
+                    st.dataframe(df)
